@@ -54,6 +54,9 @@ typedef struct {
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define RAD_TO_DEG (180.0f / 3.14159265358979323846f)
+// Set 0 untuk 9-DOF Rotation Vector (Memakai Magnetometer / Utara Magnetis)
+// Set 1 untuk 6-DOF Game Rotation Vector (Tanpa Magnetometer / Kebal Magnet)
+#define USE_GAME_ROTATION_VECTOR 0
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -130,7 +133,8 @@ void sensorHandler(void *cookie, sh2_SensorEvent_t *event) {
     live_sensor_data = value;
 
     switch (value.sensorId) {
-    case SH2_ROTATION_VECTOR:
+    case SH2_ROTATION_VECTOR:     // 9-DOF IMU (Accelerometer + Gyro + Magnetometer)
+    case SH2_GAME_ROTATION_VECTOR: // 6-DOF IMU (Accelerometer + Gyro)
     {
         float r = value.un.rotationVector.real; // qw
         float i = value.un.rotationVector.i;    // qx
@@ -147,6 +151,13 @@ void sensorHandler(void *cookie, sh2_SensorEvent_t *event) {
         bno_data.quat.x = i;
         bno_data.quat.y = j;
         bno_data.quat.z = k;
+
+        // Otomatis simpan data kalibrasi ke Flash internal BNO086 jika akurasi mencapai 3 (High Accuracy)
+        static uint8_t dcd_saved = 0;
+        if (value.status == 3 && !dcd_saved) {
+            sh2_saveDcdNow();
+            dcd_saved = 1;
+        }
 
         // 1. Roll (X-axis) [-180 s/d +180 deg]
         float sinr_cosp = 2.0f * (r * i + j * k);
@@ -239,7 +250,11 @@ int main(void)
         config.reportInterval_us = 10000; // 100 Hz
         config.batchInterval_us = 0;
 
+#if USE_GAME_ROTATION_VECTOR
+        sh2_setSensorConfig(SH2_GAME_ROTATION_VECTOR, &config);
+#else
         sh2_setSensorConfig(SH2_ROTATION_VECTOR, &config);
+#endif
 
         HAL_Delay(10);
         // Aktifkan juga Linear Acceleration
@@ -299,7 +314,11 @@ int main(void)
                     config.reportInterval_us = 10000; // 100 Hz
                     config.batchInterval_us = 0;
 
+#if USE_GAME_ROTATION_VECTOR
+                    if (sh2_setSensorConfig(SH2_GAME_ROTATION_VECTOR, &config) == SH2_OK) {
+#else
                     if (sh2_setSensorConfig(SH2_ROTATION_VECTOR, &config) == SH2_OK) {
+#endif
                         bno_connection_status = BNO_STATUS_OK;
                         last_bno_rx_tick = HAL_GetTick();
                     }
